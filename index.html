@@ -134,7 +134,7 @@ function initFirebase(){
 }
 
 var state = {
-  screen:'loading', students:[], currentStudentId:null,
+  screen:'loading', students:[], currentStudentId:null, guestMode:false,
   sensorOk:false, phase:'idle', tLiftoff:null,
   manualMode:false, manualValue:'', manualResult:null,
   belowSince:null, session:{jumps:[]}
@@ -147,7 +147,8 @@ var LANDING_THRESH = 15.0;  // m/s^2 - pico de impacto na aterrissagem
 var IMPULSE_THRESH = 13.0;  // m/s^2 - pico do empurrão da perna, precisa vir antes da decolagem
 var IMPULSE_WINDOW_S = 0.5; // tempo máx. entre o empurrão e a decolagem
 var MIN_FLIGHT_S = 0.08;
-var MAX_FLIGHT_S = 1.20;
+var MAX_FLIGHT_S = 0.85;
+var MAX_ALTURA_CM = 90; // cm - acima disso, provavelmente foi chacoalhão (ex: tirando o celular), não um salto real
 var motionHandler = null;
 var lowStreak = 0;
 var impulsoDetectado = false;
@@ -314,6 +315,16 @@ function onAccelSample(mag, now){
 function finalizarSalto(tempoVooS){
   var alturaM = (G * tempoVooS * tempoVooS) / 8;
   var alturaCm = Math.round(alturaM * 1000)/10;
+  if(alturaCm > MAX_ALTURA_CM){
+    // leitura implausível (chacoalhão, celular sendo retirado etc.) — descarta, não conta como salto
+    state.phase = 'armado';
+    state.tLiftoff = null;
+    impulsoDetectado = false;
+    lowStreak = 0;
+    showToast('Leitura estranha ignorada — prenda o celular firme e tente de novo.');
+    render();
+    return;
+  }
   var jump = {alturaCm: alturaCm, tempoVooS: Math.round(tempoVooS*1000)/1000};
   state.session.jumps.push(jump);
   state.phase = 'pos_salto';
@@ -331,7 +342,7 @@ function finalizarSalto(tempoVooS){
 
 /* ---------- render ---------- */
 function goBack(){
-  if(state.screen === 'medir'){ armar(false); state.screen = 'home'; state.currentStudentId = null; }
+  if(state.screen === 'medir'){ armar(false); state.screen = 'home'; state.currentStudentId = null; state.guestMode = false; }
   else if(state.screen === 'historico'){ state.screen = 'medir'; }
   render();
 }
@@ -363,6 +374,11 @@ function renderHome(main){
   var q = (document.getElementById('searchInput') && document.getElementById('searchInput').value || '').toLowerCase();
   var list = state.students.filter(function(s){ return !q || s.name.toLowerCase().indexOf(q) > -1; });
   var html = '<div class="search-wrap"><input id="searchInput" type="text" placeholder="Buscar aluno…" oninput="renderHome()" value="'+escapeHtml(document.getElementById('searchInput')?document.getElementById('searchInput').value:'')+'"></div>';
+  html += '<div class="student-card" onclick="openMedirVisitante()" style="border-style:dashed;">'
+    + '<div class="avatar">🙋</div>'
+    + '<div class="student-info"><p class="student-name">Visitante (não cadastrado)</p>'
+    + '<p class="student-sub">Testa o salto sem salvar nada no histórico</p></div>'
+    + '</div>';
   if(!list.length){
     html += '<div class="empty-state">Nenhum aluno encontrado.</div>';
   } else {
@@ -384,12 +400,22 @@ window.renderHome = function(){ renderHome(document.getElementById('main')); };
 
 function openMedir(id){
   state.currentStudentId = id;
+  state.guestMode = false;
   state.screen = 'medir';
   state.phase = 'idle';
   state.tLiftoff = null; state.manualResult = null; state.manualMode = false; state.session = {jumps:[]};
   render();
 }
 window.openMedir = openMedir;
+function openMedirVisitante(){
+  state.currentStudentId = null;
+  state.guestMode = true;
+  state.screen = 'medir';
+  state.phase = 'idle';
+  state.tLiftoff = null; state.manualResult = null; state.manualMode = false; state.session = {jumps:[]};
+  render();
+}
+window.openMedirVisitante = openMedirVisitante;
 
 function armar(v){
   if(v){
@@ -433,14 +459,14 @@ function falarContagemFinal(){
 }
 
 function renderMedir(main){
-  var s = getStudent(state.currentStudentId);
+  var s = state.guestMode ? {id:null, name:'Visitante', photo:null} : getStudent(state.currentStudentId);
   if(!s){ state.screen = 'home'; return render(); }
   setHeader(s.name.split(' ')[0], 'Salto vertical', true);
 
   var html = '<div class="eval-student-pill">'
     + avatarHtml(s, 'lg')
     + '<div class="info"><div class="name">'+escapeHtml(s.name)+'</div></div>'
-    + '<a onclick="openHistorico()">Histórico ›</a>'
+    + (state.guestMode ? '' : '<a onclick="openHistorico()">Histórico ›</a>')
     + '</div>';
 
   if(state.phase === 'relatorio'){
@@ -449,8 +475,13 @@ function renderMedir(main){
     html += '<div class="result-card"><div class="result-value">'+best.toFixed(0)+'</div>'
       + '<div class="result-unit">cm · melhor salto de '+jumps.length+'</div>'
       + '<div class="result-sub">'+jumps.map(function(j){return j.alturaCm.toFixed(0);}).join(' · ')+' cm</div></div>';
-    html += '<button class="btn btn-primary" onclick="salvarMelhorSalto()">Salvar recorde no histórico</button>';
-    html += '<div class="row-gap"><button class="btn btn-secondary" onclick="voltarParaHome()">Não salvar, próximo aluno</button></div>';
+    if(state.guestMode){
+      html += '<div class="status-text" style="text-align:center;margin-bottom:8px;">Modo visitante — nada é salvo</div>';
+      html += '<button class="btn btn-primary" onclick="voltarParaHome()">Ok, encerrar</button>';
+    } else {
+      html += '<button class="btn btn-primary" onclick="salvarMelhorSalto()">Salvar recorde no histórico</button>';
+      html += '<div class="row-gap"><button class="btn btn-secondary" onclick="voltarParaHome()">Não salvar, próximo aluno</button></div>';
+    }
     main.innerHTML = html;
     return;
   }
@@ -459,8 +490,13 @@ function renderMedir(main){
     var r = state.manualResult;
     html += '<div class="result-card"><div class="result-value">'+r.alturaCm.toFixed(0)+'</div>'
       + '<div class="result-unit">centímetros · salto único (manual)</div></div>';
-    html += '<button class="btn btn-primary" onclick="salvarResultadoManual()">Salvar no histórico</button>';
-    html += '<div class="row-gap"><button class="btn btn-secondary" onclick="state.manualResult=null; render();">Cancelar</button></div>';
+    if(state.guestMode){
+      html += '<div class="status-text" style="text-align:center;margin-bottom:8px;">Modo visitante — nada é salvo</div>';
+      html += '<button class="btn btn-primary" onclick="voltarParaHome()">Ok, encerrar</button>';
+    } else {
+      html += '<button class="btn btn-primary" onclick="salvarResultadoManual()">Salvar no histórico</button>';
+      html += '<div class="row-gap"><button class="btn btn-secondary" onclick="state.manualResult=null; render();">Cancelar</button></div>';
+    }
     main.innerHTML = html;
     return;
   }
@@ -539,7 +575,7 @@ window.salvarMelhorSalto = function(){
 };
 window.voltarParaHome = function(){
   state.phase = 'idle'; state.session = {jumps:[]};
-  state.screen = 'home'; state.currentStudentId = null;
+  state.screen = 'home'; state.currentStudentId = null; state.guestMode = false;
   render();
 };
 
