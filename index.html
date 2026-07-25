@@ -364,8 +364,9 @@ function finalizarSalto(tempoVooS){
 
 /* ---------- render ---------- */
 function goBack(){
-  if(state.screen === 'medir'){ armar(false); state.screen = 'home'; state.currentStudentId = null; state.guestMode = false; }
+  if(state.screen === 'medir'){ armar(false); state.screen = state.guestMode ? 'home' : 'unidade'; state.currentStudentId = null; state.guestMode = false; }
   else if(state.screen === 'historico'){ state.screen = 'medir'; }
+  else if(state.screen === 'unidade'){ state.screen = 'home'; }
   render();
 }
 function setHeader(title, sub, showBack){
@@ -387,20 +388,46 @@ function render(){
     return;
   }
   if(state.screen === 'home') return renderHome(main);
+  if(state.screen === 'unidade') return renderUnidade(main);
   if(state.screen === 'medir') return renderMedir(main);
   if(state.screen === 'historico') return renderHistorico(main);
 }
 
+var UNIDADES = ['Carlos Prates', 'Estoril'];
+
+function abrirUnidade(nome){
+  state.unidadeAtual = nome;
+  state.screen = 'unidade';
+  render();
+}
+window.abrirUnidade = abrirUnidade;
+
 function renderHome(main){
-  setHeader('BSA Salto','Escolha o aluno para medir', false);
-  var q = (document.getElementById('searchInput') && document.getElementById('searchInput').value || '').toLowerCase();
-  var list = state.students.filter(function(s){ return !q || s.name.toLowerCase().indexOf(q) > -1; });
-  var html = '<div class="search-wrap"><input id="searchInput" type="text" placeholder="Buscar aluno…" oninput="renderHome()" value="'+escapeHtml(document.getElementById('searchInput')?document.getElementById('searchInput').value:'')+'"></div>';
+  setHeader('BSA Salto','Escolha uma opção', false);
+  var html = '';
+  UNIDADES.forEach(function(nome){
+    html += '<div class="student-card" onclick="abrirUnidade(\''+nome+'\')">'
+      + '<div class="avatar">🏟️</div>'
+      + '<div class="student-info"><p class="student-name">'+escapeHtml(nome)+'</p>'
+      + '<p class="student-sub">Ver alunos da unidade</p></div>'
+      + '</div>';
+  });
   html += '<div class="student-card" onclick="openMedirVisitante()" style="border-style:dashed;">'
     + '<div class="avatar">🙋</div>'
     + '<div class="student-info"><p class="student-name">Visitante (não cadastrado)</p>'
     + '<p class="student-sub">Testa o salto sem salvar nada no histórico</p></div>'
     + '</div>';
+  main.innerHTML = html;
+}
+window.renderHome = function(){ renderHome(document.getElementById('main')); };
+
+function renderUnidade(main){
+  setHeader(state.unidadeAtual, 'Escolha o aluno para medir', true);
+  var q = (document.getElementById('searchInput') && document.getElementById('searchInput').value || '').toLowerCase();
+  var list = state.students.filter(function(s){
+    return s.unidade === state.unidadeAtual && (!q || s.name.toLowerCase().indexOf(q) > -1);
+  });
+  var html = '<div class="search-wrap"><input id="searchInput" type="text" placeholder="Buscar aluno…" oninput="renderUnidade()" value="'+escapeHtml(document.getElementById('searchInput')?document.getElementById('searchInput').value:'')+'"></div>';
   if(!list.length){
     html += '<div class="empty-state">Nenhum aluno encontrado.</div>';
   } else {
@@ -418,7 +445,7 @@ function renderHome(main){
   var input = document.getElementById('searchInput');
   if(input){ var v = input.value; input.focus(); input.setSelectionRange(v.length, v.length); }
 }
-window.renderHome = function(){ renderHome(document.getElementById('main')); };
+window.renderUnidade = function(){ renderUnidade(document.getElementById('main')); };
 
 function openMedir(id){
   state.currentStudentId = id;
@@ -597,8 +624,9 @@ window.salvarMelhorSalto = function(){
   voltarParaHome();
 };
 window.voltarParaHome = function(){
+  var wasGuest = state.guestMode;
   state.phase = 'idle'; state.session = {jumps:[]};
-  state.screen = 'home'; state.currentStudentId = null; state.guestMode = false;
+  state.screen = wasGuest ? 'home' : 'unidade'; state.currentStudentId = null; state.guestMode = false;
   render();
 };
 
