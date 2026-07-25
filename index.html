@@ -144,10 +144,14 @@ var rearmTimeoutId = null;
 var G = 9.81;
 var LIFTOFF_THRESH = 6.5;   // m/s^2 - abaixo disso conta como "no ar"
 var LANDING_THRESH = 15.0;  // m/s^2 - pico de impacto na aterrissagem
+var IMPULSE_THRESH = 13.0;  // m/s^2 - pico do empurrão da perna, precisa vir antes da decolagem
+var IMPULSE_WINDOW_S = 0.5; // tempo máx. entre o empurrão e a decolagem
 var MIN_FLIGHT_S = 0.08;
 var MAX_FLIGHT_S = 1.20;
 var motionHandler = null;
 var lowStreak = 0;
+var impulsoDetectado = false;
+var tImpulso = null;
 
 function uid(){ return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 function initials(name){
@@ -271,16 +275,29 @@ function attachMotion(){
 }
 function onAccelSample(mag, now){
   if(state.phase === 'armado'){
+    if(!impulsoDetectado){
+      // ainda não veio o empurrão da perna pra subir — ignora a queda do agachamento preparatório
+      if(mag > IMPULSE_THRESH){
+        impulsoDetectado = true;
+        tImpulso = now;
+      }
+      return;
+    }
     if(mag < LIFTOFF_THRESH){
       lowStreak++;
       if(lowStreak >= 2){
         state.phase = 'no_ar';
         state.tLiftoff = now;
         lowStreak = 0;
+        impulsoDetectado = false;
         renderStatusOnly();
       }
     } else {
       lowStreak = 0;
+      if((now - tImpulso)/1000 > IMPULSE_WINDOW_S){
+        // demorou demais depois do empurrão, não foi um salto — espera um novo empurrão
+        impulsoDetectado = false;
+      }
     }
   } else if(state.phase === 'no_ar'){
     var elapsed = (now - state.tLiftoff)/1000;
@@ -290,6 +307,7 @@ function onAccelSample(mag, now){
       // demorou demais, provavelmente ruído — rearma
       state.phase = 'armado';
       state.tLiftoff = null;
+      impulsoDetectado = false;
     }
   }
 }
@@ -306,6 +324,7 @@ function finalizarSalto(tempoVooS){
     if(state.phase !== 'pos_salto') return;
     state.phase = 'armado';
     lowStreak = 0;
+    impulsoDetectado = false;
     render();
   }, 1500);
 }
@@ -385,6 +404,7 @@ function armar(v){
         clearInterval(iv);
         state.phase = 'armado';
         lowStreak = 0;
+        impulsoDetectado = false;
         render();
       } else {
         render();
