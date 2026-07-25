@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<title>BSA Salto — App do Professor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;700&display=swap" rel="stylesheet">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<style>
+  :root{
+    --pitch-900:#0B4530;--pitch-800:#0F5C3D;--pitch-700:#14724F;
+    --chalk-100:#F6F8F4;--chalk-200:#E4EFE8;--chalk-300:#DCE5DD;
+    --lime-500:#FFC800;--lime-600:#E6B400;--amber-500:#E8A33D;--amber-700:#8A5A1E;
+    --clay-500:#FF5A36;--clay-700:#B23A20;
+    --ink-700:#142B20;--line:#DCE5DD;
+    --font-display:'Space Grotesk',sans-serif;--font-body:'Inter',sans-serif;--font-mono:'IBM Plex Mono',monospace;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;}
+  input{user-select:text;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--pitch-900);color:var(--ink-700);font-family:var(--font-body);line-height:1.5;min-height:100vh;padding-bottom:calc(30px + env(safe-area-inset-bottom));}
+  .shell{max-width:440px;margin:0 auto;background:var(--chalk-100);min-height:100vh;display:flex;flex-direction:column;}
+  header.bar{background:var(--pitch-800);color:var(--chalk-100);padding:16px 18px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5;}
+  header.bar .back{background:none;border:none;color:var(--chalk-100);font-size:22px;line-height:1;cursor:pointer;padding:4px 6px 4px 0;display:none;}
+  header.bar .back.show{display:block;}
+  header.bar .htext{flex:1;min-width:0;}
+  header.bar h1{font-family:var(--font-display);font-weight:600;font-size:18px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header.bar p{font-size:11.5px;color:var(--chalk-300);margin:1px 0 0;}
+  main{flex:1;padding:20px 18px 40px;}
+  .btn{display:block;width:100%;font-family:var(--font-display);font-weight:600;font-size:15.5px;border-radius:10px;border:none;cursor:pointer;padding:16px;text-align:center;}
+  .btn-primary{background:var(--lime-500);color:var(--pitch-900);}
+  .btn-primary:active{background:var(--lime-600);}
+  .btn-secondary{background:#fff;color:var(--pitch-800);border:1px solid var(--line);}
+  .btn[disabled]{opacity:0.4;pointer-events:none;}
+
+  .section-label{font-family:var(--font-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#8a8a80;margin:0 0 10px;}
+  .empty-state{text-align:center;padding:50px 10px;color:#8a8a80;}
+
+  .search-wrap{margin-bottom:14px;}
+  .search-wrap input{width:100%;font-size:16px;padding:13px 14px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink-700);font-family:var(--font-body);}
+
+  .student-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;margin-bottom:10px;cursor:pointer;}
+  .avatar{width:42px;height:42px;border-radius:50%;background:var(--pitch-800);color:var(--lime-500);font-family:var(--font-display);font-weight:600;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;}
+  .avatar img{width:100%;height:100%;object-fit:cover;}
+  .avatar.lg{width:52px;height:52px;font-size:18px;}
+  .student-info{flex:1;min-width:0;}
+  .student-name{font-family:var(--font-display);font-weight:600;font-size:15.5px;margin:0;color:var(--ink-700);}
+  .student-sub{font-size:11.5px;color:#8a8a80;margin:2px 0 0;}
+
+  .eval-student-pill{display:flex;align-items:center;gap:10px;margin-bottom:16px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px;}
+  .eval-student-pill .info{flex:1;min-width:0;}
+  .eval-student-pill .name{font-family:var(--font-display);font-weight:600;font-size:14.5px;}
+  .eval-student-pill a{font-family:var(--font-mono);font-size:11px;color:var(--pitch-700);text-decoration:none;flex-shrink:0;}
+
+  .instr-card{background:var(--chalk-200);border-radius:14px;padding:16px;margin-bottom:16px;font-size:13.5px;color:var(--ink-700);}
+  .instr-card b{color:var(--pitch-800);}
+  .instr-card ol{margin:8px 0 0;padding-left:18px;}
+  .instr-card li{margin-bottom:4px;}
+
+  .status-card{background:var(--pitch-800);border-radius:14px;padding:26px 18px;text-align:center;margin-bottom:16px;}
+  .status-icon{font-size:38px;line-height:1;margin-bottom:8px;}
+  .status-text{font-family:var(--font-mono);font-size:13px;color:var(--chalk-300);text-transform:uppercase;letter-spacing:0.05em;}
+  .status-time{font-family:var(--font-mono);font-weight:700;font-size:30px;color:var(--lime-500);margin-top:6px;}
+
+  .result-card{background:#fff;border:2px solid var(--lime-500);border-radius:16px;padding:24px 18px;text-align:center;margin-bottom:14px;}
+  .result-value{font-family:var(--font-display);font-weight:800;font-size:48px;color:var(--pitch-800);line-height:1;}
+  .result-unit{font-family:var(--font-mono);font-size:13px;color:#8a8a80;margin-top:4px;}
+  .result-sub{font-size:12px;color:#8a8a80;margin-top:8px;}
+
+  .manual-toggle{text-align:center;margin-top:10px;}
+  .manual-toggle a{font-family:var(--font-mono);font-size:11.5px;color:#8a8a80;text-decoration:underline;}
+  .field{margin-bottom:16px;}
+  .field label{display:block;font-size:12.5px;color:#6c6c62;font-family:var(--font-mono);margin-bottom:6px;}
+  .field input[type=number]{width:100%;font-family:var(--font-mono);font-weight:700;font-size:20px;padding:14px;border:1.5px solid var(--line);border-radius:10px;background:#fff;color:var(--pitch-800);text-align:center;}
+  .field input:focus{outline:2px solid var(--lime-600);border-color:transparent;}
+
+  .history-item{display:flex;align-items:center;justify-content:space-between;background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px 14px;margin-bottom:8px;}
+  .history-item .v{font-family:var(--font-mono);font-weight:700;font-size:16px;color:var(--pitch-800);}
+  .history-item .d{font-size:11.5px;color:#8a8a80;}
+  .history-best{color:var(--lime-600);}
+
+  .row-gap{display:flex;gap:10px;margin-top:10px;}
+  .row-gap .btn{flex:1;}
+
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);background:var(--pitch-900);color:#fff;font-size:13px;padding:12px 18px;border-radius:10px;opacity:0;pointer-events:none;transition:all 0.25s;max-width:88vw;text-align:center;z-index:20;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="bar">
+    <button class="back" id="backBtn" onclick="goBack()">‹</button>
+    <div class="htext">
+      <h1 id="headerTitle">BSA Salto</h1>
+      <p id="headerSub">Altura do salto vertical</p>
+    </div>
+  </header>
+  <main id="main"></main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+
+<script>
+(function(){
+
+var firebaseConfig = {
+  apiKey: "AIzaSyDmM2m_QnEeRflAKCyb11TzOrZM7iVgLCA",
+  authDomain: "bsa-app-493c3.firebaseapp.com",
+  projectId: "bsa-app-493c3",
+  storageBucket: "bsa-app-493c3.firebasestorage.app",
+  messagingSenderId: "455452879388",
+  appId: "1:455452879388:web:7135d93c116b2fe7cfcdd9"
+};
+var db = null;
+function initFirebase(){
+  try{
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+    var auth = firebase.auth();
+    auth.signInAnonymously().catch(function(){});
+    auth.onAuthStateChanged(function(user){
+      if(user) loadStudents().then(boot).catch(boot);
+    });
+  }catch(e){ boot(); }
+}
+
+var state = {
+  screen:'loading', students:[], currentStudentId:null,
+  sensorOk:false, phase:'idle', tLiftoff:null,
+  lastResult:null, manualMode:false, manualValue:'',
+  belowSince:null
+};
+
+var G = 9.81;
+var LIFTOFF_THRESH = 4.0;   // m/s^2 - abaixo disso conta como "no ar"
+var LANDING_THRESH = 18.0;  // m/s^2 - pico de impacto na aterrissagem
+var MIN_FLIGHT_S = 0.10;
+var MAX_FLIGHT_S = 1.20;
+var motionHandler = null;
+
+function uid(){ return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+function initials(name){
+  var parts = name.trim().split(/\s+/);
+  var a = parts[0] ? parts[0][0] : '';
+  var b = parts.length>1 ? parts[parts.length-1][0] : '';
+  return (a+b).toUpperCase();
+}
+function fmtDate(ts){
+  var d = ts && ts.toDate ? ts.toDate() : new Date();
+  var dd = String(d.getDate()).padStart(2,'0');
+  var mm = String(d.getMonth()+1).padStart(2,'0');
+  return dd+'/'+mm;
+}
+function showToast(msg){
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, 2600);
+}
+function avatarHtml(student, extraClass){
+  var cls = 'avatar' + (extraClass ? ' '+extraClass : '');
+  if(student && student.photo) return '<div class="'+cls+'"><img src="'+student.photo+'" alt=""></div>';
+  return '<div class="'+cls+'">'+(student?initials(student.name):'?')+'</div>';
+}
+function escapeHtml(str){
+  return String(str).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+}
+function getStudent(id){
+  for(var i=0;i<state.students.length;i++){ if(state.students[i].id===id) return state.students[i]; }
+  return null;
+}
+
+/* ---------- data ---------- */
+async function loadStudents(){
+  try{
+    if(!db){ state.students = []; return; }
+    var alunosSnap = await db.collection('alunos').get();
+    var medSnap = await db.collection('medicoesSalto').get();
+    var porAluno = {};
+    medSnap.forEach(function(doc){
+      var d = doc.data();
+      if(!porAluno[d.alunoId]) porAluno[d.alunoId] = [];
+      porAluno[d.alunoId].push(d);
+    });
+    var lista = [];
+    alunosSnap.forEach(function(doc){
+      var d = doc.data();
+      if(d.statusGeral === 'inativo') return;
+      var meds = (porAluno[doc.id] || []).slice().sort(function(a,b){
+        var ta = a.criadoEm && a.criadoEm.toMillis ? a.criadoEm.toMillis() : 0;
+        var tb = b.criadoEm && b.criadoEm.toMillis ? b.criadoEm.toMillis() : 0;
+        return ta - tb;
+      });
+      lista.push({
+        id: doc.id, name: d.nome || '(sem nome)', photo: d.foto || null,
+        unidade: d.unidade || '', medicoes: meds
+      });
+    });
+    lista.sort(function(a,b){ return a.name.localeCompare(b.name); });
+    state.students = lista;
+  }catch(e){ state.students = []; }
+}
+async function salvarMedicao(s, ev){
+  try{
+    if(!db) throw new Error('sem conexão');
+    await db.collection('medicoesSalto').add(Object.assign(
+      {alunoId: s.id, nome: s.name, unidade: s.unidade||''},
+      ev,
+      {criadoEm: firebase.firestore.FieldValue.serverTimestamp()}
+    ));
+    s.medicoes.push(Object.assign({alunoId:s.id, nome:s.name, unidade:s.unidade||''}, ev, {criadoEm:{toMillis:function(){return Date.now();}, toDate:function(){return new Date();}}}));
+    showToast('Salvo no histórico de '+s.name.split(' ')[0]+'.');
+  }catch(e){
+    showToast('Não deu pra salvar agora — sem conexão.');
+  }
+}
+
+/* ---------- speech ---------- */
+function falarAltura(cm){
+  try{
+    if(!('speechSynthesis' in window)) return;
+    var texto = cm.toFixed(0) + ' centímetros';
+    var u = new SpeechSynthesisUtterance(texto);
+    u.lang = 'pt-BR';
+    u.rate = 0.95;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  }catch(e){}
+}
+
+/* ---------- sensor ---------- */
+function precisaPermissao(){
+  return typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function';
+}
+async function liberarSensor(){
+  if(typeof DeviceMotionEvent === 'undefined'){
+    showToast('Este aparelho não tem sensor de movimento acessível pelo navegador.');
+    return;
+  }
+  if(precisaPermissao()){
+    try{
+      var resp = await DeviceMotionEvent.requestPermission();
+      if(resp === 'granted'){ state.sensorOk = true; attachMotion(); showToast('Sensor liberado!'); }
+      else { showToast('Permissão negada. Vá em Ajustes > Safari > Movimento e Orientação e permita.'); }
+    }catch(e){ showToast('Não consegui pedir a permissão agora.'); }
+  } else {
+    state.sensorOk = true; attachMotion();
+  }
+  render();
+}
+function attachMotion(){
+  if(motionHandler) return;
+  motionHandler = function(e){
+    var a = e.accelerationIncludingGravity;
+    if(!a || a.x===null) return;
+    var mag = Math.sqrt((a.x||0)*(a.x||0) + (a.y||0)*(a.y||0) + (a.z||0)*(a.z||0));
+    onAccelSample(mag, performance.now());
+  };
+  window.addEventListener('devicemotion', motionHandler);
+}
+function onAccelSample(mag, now){
+  if(state.phase === 'armado'){
+    if(mag < LIFTOFF_THRESH){
+      if(state.belowSince === null) state.belowSince = now;
+      if(now - state.belowSince > 25){ // sustentado por ~25ms
+        state.phase = 'no_ar';
+        state.tLiftoff = state.belowSince;
+        state.belowSince = null;
+        renderStatusOnly();
+      }
+    } else {
+      state.belowSince = null;
+    }
+  } else if(state.phase === 'no_ar'){
+    var elapsed = (now - state.tLiftoff)/1000;
+    if(mag > LANDING_THRESH && elapsed > MIN_FLIGHT_S){
+      finalizarSalto(elapsed);
+    } else if(elapsed > MAX_FLIGHT_S){
+      // demorou demais, provavelmente ruído — rearma
+      state.phase = 'armado';
+      state.tLiftoff = null;
+    }
+  }
+}
+function finalizarSalto(tempoVooS){
+  var alturaM = (G * tempoVooS * tempoVooS) / 8;
+  var alturaCm = Math.round(alturaM * 1000)/10;
+  state.phase = 'resultado';
+  state.lastResult = {alturaCm: alturaCm, tempoVooS: Math.round(tempoVooS*1000)/1000};
+  falarAltura(alturaCm);
+  render();
+}
+
+/* ---------- render ---------- */
+function goBack(){
+  if(state.screen === 'medir'){ armar(false); state.screen = 'home'; state.currentStudentId = null; }
+  else if(state.screen === 'historico'){ state.screen = 'medir'; }
+  render();
+}
+function setHeader(title, sub, showBack){
+  document.getElementById('headerTitle').textContent = title;
+  document.getElementById('headerSub').textContent = sub;
+  var back = document.getElementById('backBtn');
+  if(showBack){ back.classList.add('show'); } else { back.classList.remove('show'); }
+}
+function boot(){
+  state.screen = state.screen === 'loading' ? 'home' : state.screen;
+  render();
+}
+function render(){
+  var main = document.getElementById('main');
+  if(state.screen === 'loading'){
+    setHeader('BSA Salto','Carregando…', false);
+    main.innerHTML = '<div class="empty-state">Carregando alunos…</div>';
+    return;
+  }
+  if(state.screen === 'home') return renderHome(main);
+  if(state.screen === 'medir') return renderMedir(main);
+  if(state.screen === 'historico') return renderHistorico(main);
+}
+
+function renderHome(main){
+  setHeader('BSA Salto','Escolha o aluno para medir', false);
+  var q = (document.getElementById('searchInput') && document.getElementById('searchInput').value || '').toLowerCase();
+  var list = state.students.filter(function(s){ return !q || s.name.toLowerCase().indexOf(q) > -1; });
+  var html = '<div class="search-wrap"><input id="searchInput" type="text" placeholder="Buscar aluno…" oninput="renderHome()" value="'+escapeHtml(document.getElementById('searchInput')?document.getElementById('searchInput').value:'')+'"></div>';
+  if(!list.length){
+    html += '<div class="empty-state">Nenhum aluno encontrado.</div>';
+  } else {
+    html += '<div class="section-label">Alunos ('+list.length+')</div>';
+    list.forEach(function(s){
+      var ultima = s.medicoes.length ? s.medicoes[s.medicoes.length-1] : null;
+      html += '<div class="student-card" onclick="openMedir(\''+s.id+'\')">'
+        + avatarHtml(s)
+        + '<div class="student-info"><p class="student-name">'+escapeHtml(s.name)+'</p>'
+        + '<p class="student-sub">'+(ultima ? 'Último: '+ultima.alturaCm+' cm' : 'Sem medições ainda')+'</p></div>'
+        + '</div>';
+    });
+  }
+  main.innerHTML = html;
+  var input = document.getElementById('searchInput');
+  if(input){ var v = input.value; input.focus(); input.setSelectionRange(v.length, v.length); }
+}
+window.renderHome = function(){ renderHome(document.getElementById('main')); };
+
+function openMedir(id){
+  state.currentStudentId = id;
+  state.screen = 'medir';
+  state.phase = 'idle';
+  state.tLiftoff = null; state.lastResult = null; state.manualMode = false;
+  render();
+}
+window.openMedir = openMedir;
+
+function armar(v){
+  if(v){ state.phase = 'armado'; state.belowSince = null; }
+  else { state.phase = 'idle'; }
+}
+window.armar = function(){ armar(true); render(); };
+
+function renderMedir(main){
+  var s = getStudent(state.currentStudentId);
+  if(!s){ state.screen = 'home'; return render(); }
+  setHeader(s.name.split(' ')[0], 'Salto vertical', true);
+
+  var html = '<div class="eval-student-pill">'
+    + avatarHtml(s, 'lg')
+    + '<div class="info"><div class="name">'+escapeHtml(s.name)+'</div></div>'
+    + '<a onclick="openHistorico()">Histórico ›</a>'
+    + '</div>';
+
+  if(state.lastResult){
+    var r = state.lastResult;
+    html += '<div class="result-card"><div class="result-value">'+r.alturaCm.toFixed(0)+'</div>'
+      + '<div class="result-unit">centímetros · '+r.tempoVooS.toFixed(2).replace('.',',')+'s no ar</div>'
+      + '<div class="result-sub">salto vertical</div></div>';
+    html += '<button class="btn btn-primary" onclick="salvarResultado()">Salvar no histórico</button>';
+    html += '<div class="row-gap"><button class="btn btn-secondary" onclick="novoSalto()">Novo salto</button></div>';
+    main.innerHTML = html;
+    return;
+  }
+
+  if(state.manualMode){
+    html += '<div class="field"><label>Altura do salto (centímetros)</label>'
+      + '<input type="number" inputmode="decimal" id="manualInput" placeholder="ex: 28" oninput="state.manualValue=this.value"></div>';
+    html += '<button class="btn btn-primary" onclick="confirmarManual()">Confirmar</button>';
+    html += '<div class="manual-toggle"><a onclick="state.manualMode=false; render();">usar o sensor do celular</a></div>';
+    main.innerHTML = html;
+    return;
+  }
+
+  html += '<div class="instr-card"><b>Como medir:</b>'
+    + '<ol><li>Prenda o celular bem firme na cintura (cinta ou bolso justo do short) — não pode balançar</li>'
+    + '<li>Toque em "Liberar sensor" (o iPhone vai pedir permissão de movimento)</li>'
+    + '<li>Toque em "Pronto pra saltar" e faça o salto vertical</li></ol></div>';
+
+  if(!state.sensorOk){
+    html += '<button class="btn btn-primary" onclick="liberarSensor()">📱 Liberar sensor de movimento</button>';
+  } else if(state.phase === 'idle'){
+    html += '<button class="btn btn-primary" onclick="armar()">🟢 Pronto pra saltar</button>';
+  } else if(state.phase === 'armado'){
+    html += '<div class="status-card"><div class="status-icon">🧍</div><div class="status-text">Aguardando o salto…</div></div>';
+    html += '<button class="btn btn-secondary" onclick="cancelarArmado()">Cancelar</button>';
+  } else if(state.phase === 'no_ar'){
+    html += '<div class="status-card"><div class="status-icon">🚀</div><div class="status-text">No ar…</div></div>';
+  }
+
+  html += '<div class="manual-toggle"><a onclick="state.manualMode=true; render();">digitar a altura manualmente</a></div>';
+  main.innerHTML = html;
+}
+function renderStatusOnly(){
+  if(state.screen === 'medir') render();
+}
+window.cancelarArmado = function(){ state.phase = 'idle'; render(); };
+window.novoSalto = function(){ state.lastResult = null; state.phase = 'idle'; render(); };
+window.liberarSensor = liberarSensor;
+window.confirmarManual = function(){
+  var v = parseFloat(state.manualValue);
+  if(!v || v<=0){ showToast('Digite uma altura válida.'); return; }
+  state.lastResult = {alturaCm: Math.round(v*10)/10, tempoVooS: Math.sqrt((v/100)*8/G)};
+  state.manualMode = false;
+  falarAltura(v);
+  render();
+};
+window.salvarResultado = function(){
+  var s = getStudent(state.currentStudentId);
+  if(!s || !state.lastResult) return;
+  salvarMedicao(s, state.lastResult);
+  state.lastResult = null; state.phase = 'idle';
+  render();
+};
+
+function openHistorico(){ state.screen = 'historico'; render(); }
+window.openHistorico = openHistorico;
+
+function renderHistorico(main){
+  var s = getStudent(state.currentStudentId);
+  if(!s){ state.screen = 'home'; return render(); }
+  setHeader(s.name.split(' ')[0], 'Histórico de salto', true);
+  var meds = s.medicoes.slice().reverse();
+  var html = '';
+  if(!meds.length){
+    html = '<div class="empty-state">Nenhuma medição salva ainda.</div>';
+  } else {
+    var best = meds.reduce(function(m,x){ return x.alturaCm > m ? x.alturaCm : m; }, 0);
+    html += '<div class="section-label">'+meds.length+' medição(ões)</div>';
+    meds.forEach(function(m){
+      html += '<div class="history-item"><div><div class="v'+(m.alturaCm===best?' history-best':'')+'">'+m.alturaCm.toFixed(0)+' cm</div>'
+        + '<div class="d">'+m.tempoVooS.toFixed(2).replace('.',',')+'s no ar</div></div>'
+        + '<div class="d">'+fmtDate(m.criadoEm)+'</div></div>';
+    });
+  }
+  main.innerHTML = html;
+}
+
+initFirebase();
+setTimeout(function(){ if(state.screen==='loading') boot(); }, 3000);
+})();
+</script>
+</body>
+</html>
