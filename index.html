@@ -65,6 +65,8 @@
   .status-icon{font-size:38px;line-height:1;margin-bottom:8px;}
   .status-text{font-family:var(--font-mono);font-size:13px;color:var(--chalk-300);text-transform:uppercase;letter-spacing:0.05em;}
   .status-time{font-family:var(--font-mono);font-weight:700;font-size:30px;color:var(--lime-500);margin-top:6px;}
+  .status-count{font-family:var(--font-display);font-weight:800;font-size:64px;color:var(--lime-500);line-height:1;margin-top:4px;}
+  main.locked{pointer-events:none;}
 
   .result-card{background:#fff;border:2px solid var(--lime-500);border-radius:16px;padding:24px 18px;text-align:center;margin-bottom:14px;}
   .result-value{font-family:var(--font-display);font-weight:800;font-size:48px;color:var(--pitch-800);line-height:1;}
@@ -139,11 +141,12 @@ var state = {
 };
 
 var G = 9.81;
-var LIFTOFF_THRESH = 4.0;   // m/s^2 - abaixo disso conta como "no ar"
-var LANDING_THRESH = 18.0;  // m/s^2 - pico de impacto na aterrissagem
-var MIN_FLIGHT_S = 0.10;
+var LIFTOFF_THRESH = 6.5;   // m/s^2 - abaixo disso conta como "no ar"
+var LANDING_THRESH = 15.0;  // m/s^2 - pico de impacto na aterrissagem
+var MIN_FLIGHT_S = 0.08;
 var MAX_FLIGHT_S = 1.20;
 var motionHandler = null;
+var lowStreak = 0;
 
 function uid(){ return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 function initials(name){
@@ -268,15 +271,15 @@ function attachMotion(){
 function onAccelSample(mag, now){
   if(state.phase === 'armado'){
     if(mag < LIFTOFF_THRESH){
-      if(state.belowSince === null) state.belowSince = now;
-      if(now - state.belowSince > 25){ // sustentado por ~25ms
+      lowStreak++;
+      if(lowStreak >= 2){
         state.phase = 'no_ar';
-        state.tLiftoff = state.belowSince;
-        state.belowSince = null;
+        state.tLiftoff = now;
+        lowStreak = 0;
         renderStatusOnly();
       }
     } else {
-      state.belowSince = null;
+      lowStreak = 0;
     }
   } else if(state.phase === 'no_ar'){
     var elapsed = (now - state.tLiftoff)/1000;
@@ -316,6 +319,7 @@ function boot(){
 }
 function render(){
   var main = document.getElementById('main');
+  main.className = '';
   if(state.screen === 'loading'){
     setHeader('BSA Salto','Carregando…', false);
     main.innerHTML = '<div class="empty-state">Carregando alunos…</div>';
@@ -360,10 +364,34 @@ function openMedir(id){
 window.openMedir = openMedir;
 
 function armar(v){
-  if(v){ state.phase = 'armado'; state.belowSince = null; }
+  if(v){
+    state.phase = 'preparando';
+    state.prepCount = 5;
+    falarContagem();
+    var iv = setInterval(function(){
+      state.prepCount--;
+      if(state.prepCount <= 0){
+        clearInterval(iv);
+        state.phase = 'armado';
+        lowStreak = 0;
+        render();
+      } else {
+        render();
+      }
+    }, 1000);
+  }
   else { state.phase = 'idle'; }
 }
 window.armar = function(){ armar(true); render(); };
+function falarContagem(){
+  try{
+    if(!('speechSynthesis' in window)) return;
+    var u = new SpeechSynthesisUtterance('Pode prender o celular. Cinco, quatro, três, dois, um. Pode saltar.');
+    u.lang = 'pt-BR'; u.rate = 0.9;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  }catch(e){}
+}
 
 function renderMedir(main){
   var s = getStudent(state.currentStudentId);
@@ -397,23 +425,25 @@ function renderMedir(main){
   }
 
   html += '<div class="instr-card"><b>Como medir:</b>'
-    + '<ol><li>Prenda o celular bem firme na cintura (cinta ou bolso justo do short) — não pode balançar</li>'
-    + '<li>Toque em "Liberar sensor" (o iPhone vai pedir permissão de movimento)</li>'
-    + '<li>Toque em "Pronto pra saltar" e faça o salto vertical</li></ol></div>';
+    + '<ol><li>Toque em "Pronto pra saltar" <u>antes</u> de prender o celular</li>'
+    + '<li>Você tem 5 segundos (com contagem por voz) pra prender o celular na cintura, bem firme</li>'
+    + '<li>Quando ouvir "pode saltar", o aluno salta — a tela não precisa mais ser tocada</li></ol></div>';
 
   if(!state.sensorOk){
     html += '<button class="btn btn-primary" onclick="liberarSensor()">📱 Liberar sensor de movimento</button>';
   } else if(state.phase === 'idle'){
     html += '<button class="btn btn-primary" onclick="armar()">🟢 Pronto pra saltar</button>';
+  } else if(state.phase === 'preparando'){
+    html += '<div class="status-card"><div class="status-text">Prenda o celular agora</div><div class="status-count">'+state.prepCount+'</div></div>';
   } else if(state.phase === 'armado'){
     html += '<div class="status-card"><div class="status-icon">🧍</div><div class="status-text">Aguardando o salto…</div></div>';
-    html += '<button class="btn btn-secondary" onclick="cancelarArmado()">Cancelar</button>';
   } else if(state.phase === 'no_ar'){
     html += '<div class="status-card"><div class="status-icon">🚀</div><div class="status-text">No ar…</div></div>';
   }
 
   html += '<div class="manual-toggle"><a onclick="state.manualMode=true; render();">digitar a altura manualmente</a></div>';
   main.innerHTML = html;
+  main.className = (state.phase==='preparando'||state.phase==='armado'||state.phase==='no_ar') ? 'locked' : '';
 }
 function renderStatusOnly(){
   if(state.screen === 'medir') render();
@@ -434,6 +464,7 @@ window.salvarResultado = function(){
   if(!s || !state.lastResult) return;
   salvarMedicao(s, state.lastResult);
   state.lastResult = null; state.phase = 'idle';
+  state.screen = 'home'; state.currentStudentId = null;
   render();
 };
 
