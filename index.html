@@ -274,6 +274,28 @@ function attachMotion(){
   };
   window.addEventListener('devicemotion', motionHandler);
 }
+/* toque duplo em qualquer lugar da tela encerra a sessão — útil com o celular preso na cintura, sem enxergar a tela */
+var lastTapTime = 0;
+document.addEventListener('touchend', function(e){
+  if(state.screen !== 'medir') return;
+  if(state.phase !== 'armado' && state.phase !== 'no_ar' && state.phase !== 'pos_salto') return;
+  var now = performance.now();
+  if(now - lastTapTime < 600){
+    lastTapTime = 0;
+    terminarSessao();
+  } else {
+    lastTapTime = now;
+  }
+}, {passive:true});
+function falarEncerrado(){
+  try{
+    if(!('speechSynthesis' in window)) return;
+    var u = new SpeechSynthesisUtterance('Sessão encerrada.');
+    u.lang = 'pt-BR'; u.rate = 0.95;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  }catch(e){}
+}
 function onAccelSample(mag, now){
   if(state.phase === 'armado'){
     if(!impulsoDetectado){
@@ -513,7 +535,7 @@ function renderMedir(main){
   html += '<div class="instr-card"><b>Como medir:</b>'
     + '<ol><li>Toque em "Pronto pra saltar" <u>antes</u> de prender o celular</li>'
     + '<li>Você tem 10 segundos (com contagem por voz) pra prender o celular na cintura, bem firme</li>'
-    + '<li>Quando ouvir "pode saltar", o aluno pode saltar quantas vezes quiser, sem tocar na tela — toque "Terminei" no final</li></ol></div>';
+    + '<li>Quando ouvir "pode saltar", o aluno pode saltar quantas vezes quiser, sem tocar na tela — no final, toque "Terminei" <u>ou dê 2 toques rápidos em qualquer parte da tela</u></li></ol></div>';
 
   if(!state.sensorOk){
     html += '<button class="btn btn-primary" onclick="liberarSensor()">📱 Liberar sensor de movimento</button>';
@@ -563,6 +585,7 @@ window.terminarSessao = function(){
   clearTimeout(rearmTimeoutId);
   if(!state.session.jumps.length){ showToast('Nenhum salto registrado ainda.'); return; }
   state.phase = 'relatorio';
+  falarEncerrado();
   render();
 };
 window.salvarMelhorSalto = function(){
