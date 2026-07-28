@@ -134,22 +134,25 @@ function initFirebase(){
 }
 
 var state = {
-  screen:'loading', students:[], currentStudentId:null,
-  sensorOk:false, phase:'idle', tLiftoff:null,
+  screen:'loading', students:[], currentStudentId:null, guestMode:false,
+  sensorOk:false, phase:'idle', tLiftoff:null, paused:false, circuito:null,
   manualMode:false, manualValue:'', manualResult:null,
-  belowSince:null, session:{jumps:[]},
-  visitorMode:false, visitor:{queue:[], activeIdx:-1, paused:false, armed:false},
-  atribuindoIdx:null, atribuirBusca:''
+  belowSince:null, session:{jumps:[]}
 };
 var rearmTimeoutId = null;
 
 var G = 9.81;
 var LIFTOFF_THRESH = 6.5;   // m/s^2 - abaixo disso conta como "no ar"
 var LANDING_THRESH = 15.0;  // m/s^2 - pico de impacto na aterrissagem
+var IMPULSE_THRESH = 13.0;  // m/s^2 - pico do empurrão da perna, precisa vir antes da decolagem
+var IMPULSE_WINDOW_S = 0.5; // tempo máx. entre o empurrão e a decolagem
 var MIN_FLIGHT_S = 0.08;
-var MAX_FLIGHT_S = 1.20;
+var MAX_FLIGHT_S = 0.85;
+var MAX_ALTURA_CM = 90; // cm - acima disso, provavelmente foi chacoalhão (ex: tirando o celular), não um salto real
 var motionHandler = null;
 var lowStreak = 0;
+var impulsoDetectado = false;
+var tImpulso = null;
 
 function uid(){ return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 function initials(name){
@@ -271,59 +274,30 @@ function attachMotion(){
   };
   window.addEventListener('devicemotion', motionHandler);
 }
-function onAccelSample(mag, now){
-  if(state.visitorMode){ handleVisitorAccel(mag, now); return; }
-  if(state.phase === 'armado'){
-    if(mag < LIFTOFF_THRESH){
-      lowStreak++;
-      if(lowStreak >= 2){
-        state.phase = 'no_ar';
-        state.tLiftoff = now;
-        lowStreak = 0;
-        renderStatusOnly();
-      }
-    } else {
-      lowStreak = 0;
-    }
-  } else if(state.phase === 'no_ar'){
-    var elapsed = (now - state.tLiftoff)/1000;
-    if(mag > LANDING_THRESH && elapsed > MIN_FLIGHT_S){
-      finalizarSalto(elapsed);
-    } else if(elapsed > MAX_FLIGHT_S){
-      // demorou demais, provavelmente ruído — rearma
-      state.phase = 'armado';
-      state.tLiftoff = null;
-    }
-  }
-}
-/* ---------- modo visitante (mãos livres, celular coberto) ---------- */
-function handleVisitorAccel(mag, now){
-  var v = state.visitor;
-  if(!v.armed || v.paused || v.activeIdx < 0) return;
-  if(v.phaseAir){
-    var elapsed = (now - v.tLiftoff)/1000;
-    if(mag > LANDING_THRESH && elapsed > MIN_FLIGHT_S){
-      var alturaM = (G*elapsed*elapsed)/8;
-      var alturaCm = Math.round(alturaM*1000)/10;
-      v.queue[v.activeIdx].jumps.push({alturaCm:alturaCm, tempoVooS:Math.round(elapsed*1000)/1000});
-      falar(alturaCm.toFixed(0)+' centímetros');
-      v.phaseAir = false;
-      v.vLowStreak = 0;
-    } else if(elapsed > MAX_FLIGHT_S){
-      v.phaseAir = false;
-    }
-  } else {
-    if(mag < LIFTOFF_THRESH){
-      v.vLowStreak = (v.vLowStreak||0) + 1;
-      if(v.vLowStreak >= 2){
-        v.phaseAir = true;
-        v.tLiftoff = now;
-        v.vLowStreak = 0;
-      }
-    } else {
-      v.vLowStreak = 0;
-    }
-  }
+/* gestos por toque em qualquer lugar da tela — pra usar com o celular coberto/preso na cintura:
+   1 toque = pausar/continuar · 2 toques = encerrar sessão do aluno atual · 3 toques = próximo aluno do circuito, sem perguntar nada */
+var tapTimes = [];
+var gestureTimeout = null;
+document.addEventListener('touchend', function(e){
+  if(state.screen !== 'medir') return;
+  if(state.phase !== 'armado' && state.phase !== 'no_ar' && state.phase !== 'pos_salto') return;
+  var now = performance.now();
+  tapTimes.push(now);
+  tapTimes = tapTimes.filter(function(t){ return now - t < 650; });
+  clearTimeout(gestureTimeout);
+  gestureTimeout = setTimeout(function(){
+    var n = tapTimes.length;
+    tapTimes = [];
+    if(n === 1) togglePausa();
+    else if(n === 2) terminarSessao();
+    else if(n >= 3) avancarCircuito();
+  }, 400);
+}, {passive:true});
+function vibrar(pattern){ try{ if(navigator.vibrate) navigator.vibrate(pattern); }catch(e){} }
+function togglePausa(){
+  state.paused = !state.paused;
+  vibrar(80);
+  falar(state.paused ? 'Pausado.' : 'Pode continuar saltando.');
 }
 function falar(texto){
   try{
@@ -334,84 +308,61 @@ function falar(texto){
     window.speechSynthesis.speak(u);
   }catch(e){}
 }
-function vibrar(pattern){
-  try{ if(navigator.vibrate) navigator.vibrate(pattern); }catch(e){}
+function falarEncerrado(){
+  falar('Sessão encerrada.');
 }
-var tapTimes = [];
-var gestureTimeout = null;
-function attachGestureListener(){
-  document.addEventListener('touchend', onGlobalTap, {passive:true});
+function onAccelSample(mag, now){
+  if(state.paused) return;
+  if(state.phase === 'armado'){
+    if(!impulsoDetectado){
+      // ainda não veio o empurrão da perna pra subir — ignora a queda do agachamento preparatório
+      if(mag > IMPULSE_THRESH){
+        impulsoDetectado = true;
+        tImpulso = now;
+      }
+      return;
+    }
+    if(mag < LIFTOFF_THRESH){
+      lowStreak++;
+      if(lowStreak >= 2){
+        state.phase = 'no_ar';
+        state.tLiftoff = now;
+        lowStreak = 0;
+        impulsoDetectado = false;
+        renderStatusOnly();
+      }
+    } else {
+      lowStreak = 0;
+      if((now - tImpulso)/1000 > IMPULSE_WINDOW_S){
+        // demorou demais depois do empurrão, não foi um salto — espera um novo empurrão
+        impulsoDetectado = false;
+      }
+    }
+  } else if(state.phase === 'no_ar'){
+    var elapsed = (now - state.tLiftoff)/1000;
+    if(mag > LANDING_THRESH && elapsed > MIN_FLIGHT_S){
+      finalizarSalto(elapsed);
+    } else if(elapsed > MAX_FLIGHT_S){
+      // demorou demais, provavelmente ruído — rearma
+      state.phase = 'armado';
+      state.tLiftoff = null;
+      impulsoDetectado = false;
+    }
+  }
 }
-function onGlobalTap(){
-  if(!state.visitorMode) return;
-  var now = Date.now();
-  tapTimes.push(now);
-  tapTimes = tapTimes.filter(function(t){ return now - t < 650; });
-  clearTimeout(gestureTimeout);
-  gestureTimeout = setTimeout(function(){
-    var n = tapTimes.length;
-    tapTimes = [];
-    if(n === 1) gesturePause();
-    else if(n === 2) gestureEndVisitor();
-    else if(n === 3) gestureNextVisitor();
-    else if(n >= 4) gestureSairVisitante();
-  }, 400);
-}
-function gesturePause(){
-  var v = state.visitor;
-  if(v.activeIdx < 0){ falar('Nenhuma sessão ativa. Três toques pra começar.'); return; }
-  v.paused = !v.paused;
-  vibrar(80);
-  falar(v.paused ? 'Pausado.' : 'Pode continuar saltando.');
-  render();
-}
-function gestureEndVisitor(){
-  var v = state.visitor;
-  if(v.activeIdx < 0){ falar('Nenhuma sessão ativa.'); return; }
-  v.armed = false;
-  v.phaseAir = false;
-  vibrar([100,60,100]);
-  var sess = v.queue[v.activeIdx];
-  var n = sess.jumps.length;
-  var best = n ? Math.max.apply(null, sess.jumps.map(function(j){return j.alturaCm;})) : 0;
-  falar(n ? ('Sessão encerrada. '+n+' saltos. Recorde de '+best.toFixed(0)+' centímetros.') : 'Sessão encerrada sem saltos.');
-  render();
-}
-function gestureNextVisitor(){
-  var v = state.visitor;
-  vibrar([70,50,70,50,70]);
-  if(v.activeIdx >= 0){ v.armed = false; v.phaseAir = false; }
-  v.queue.push({jumps:[], assignedTo:null});
-  v.activeIdx = v.queue.length - 1;
-  v.paused = false;
-  falar('Pode iniciar o salto.');
-  render();
-  setTimeout(function(){ if(state.visitor === v) v.armed = true; }, 2000);
-}
-function gestureSairVisitante(){
-  var v = state.visitor;
-  v.armed = false; v.paused = false; v.phaseAir = false;
-  vibrar([120,80,120,80,120]);
-  falar('Modo visitante encerrado. Voltando pra revisão.');
-  state.visitorMode = false;
-  state.screen = 'visitante-revisao';
-  render();
-}
-window.iniciarModoVisitante = async function(){
-  if(!state.sensorOk){ await liberarSensor(); if(!state.sensorOk) return; }
-  state.visitorMode = true;
-  state.visitor = {queue:[{jumps:[], assignedTo:null}], activeIdx:0, paused:false, armed:false, phaseAir:false, vLowStreak:0};
-  state.screen = 'visitante';
-  render();
-  falar('Modo visitante iniciado. Prenda o celular no aluno. Um toque pausa. Dois toques encerra a sessão. Três toques começa com o próximo aluno. Quatro toques sai do modo visitante. Você tem dez segundos.');
-  setTimeout(function(){ falar('Três, dois, um. Pode saltar.'); }, 7000);
-  setTimeout(function(){ if(state.visitor) state.visitor.armed = true; }, 10000);
-};
-window.sairRevisao = function(){ state.screen = 'home'; render(); };
-
 function finalizarSalto(tempoVooS){
   var alturaM = (G * tempoVooS * tempoVooS) / 8;
   var alturaCm = Math.round(alturaM * 1000)/10;
+  if(alturaCm > MAX_ALTURA_CM){
+    // leitura implausível (chacoalhão, celular sendo retirado etc.) — descarta, não conta como salto
+    state.phase = 'armado';
+    state.tLiftoff = null;
+    impulsoDetectado = false;
+    lowStreak = 0;
+    showToast('Leitura estranha ignorada — prenda o celular firme e tente de novo.');
+    render();
+    return;
+  }
   var jump = {alturaCm: alturaCm, tempoVooS: Math.round(tempoVooS*1000)/1000};
   state.session.jumps.push(jump);
   state.phase = 'pos_salto';
@@ -422,16 +373,16 @@ function finalizarSalto(tempoVooS){
     if(state.phase !== 'pos_salto') return;
     state.phase = 'armado';
     lowStreak = 0;
+    impulsoDetectado = false;
     render();
   }, 1500);
 }
 
 /* ---------- render ---------- */
 function goBack(){
-  if(state.screen === 'medir'){ armar(false); state.screen = 'home'; state.currentStudentId = null; }
+  if(state.screen === 'medir'){ armar(false); state.circuito = null; state.screen = state.guestMode ? 'home' : 'unidade'; state.currentStudentId = null; state.guestMode = false; }
   else if(state.screen === 'historico'){ state.screen = 'medir'; }
-  else if(state.screen === 'visitante-revisao'){ state.screen = 'home'; }
-  else if(state.screen === 'visitante'){ /* usa o gesto de 4 toques pra sair */ }
+  else if(state.screen === 'unidade'){ state.screen = 'home'; }
   render();
 }
 function setHeader(title, sub, showBack){
@@ -453,23 +404,50 @@ function render(){
     return;
   }
   if(state.screen === 'home') return renderHome(main);
+  if(state.screen === 'unidade') return renderUnidade(main);
   if(state.screen === 'medir') return renderMedir(main);
   if(state.screen === 'historico') return renderHistorico(main);
-  if(state.screen === 'visitante') return renderVisitanteAtivo(main);
-  if(state.screen === 'visitante-revisao') return renderVisitanteRevisao(main);
 }
 
+var UNIDADES = ['Carlos Prates', 'Estoril'];
+
+function abrirUnidade(nome){
+  state.unidadeAtual = nome;
+  state.screen = 'unidade';
+  render();
+}
+window.abrirUnidade = abrirUnidade;
+
 function renderHome(main){
-  setHeader('BSA Salto','Escolha o aluno para medir', false);
-  var pendentes = state.visitor.queue.filter(function(s){ return s.jumps.length && !s.assignedTo; }).length;
-  var q = (document.getElementById('searchInput') && document.getElementById('searchInput').value || '').toLowerCase();
-  var list = state.students.filter(function(s){ return !q || s.name.toLowerCase().indexOf(q) > -1; });
-  var html = '<div class="instr-card" style="margin-bottom:14px;">'
-    + '<b>🎯 Modo visitante (celular coberto, sem tela)</b><br>Pra circuito rápido: cobre o celular e usa toques em qualquer lugar da tela — 1 toque pausa, 2 encerra, 3 começa o próximo aluno, 4 sai.'
-    + '<button class="btn btn-secondary" style="margin-top:10px;" onclick="iniciarModoVisitante()">Iniciar modo visitante</button>'
-    + (pendentes ? '<button class="btn btn-primary" style="margin-top:8px;" onclick="state.screen=\'visitante-revisao\'; render();">Revisar '+pendentes+' sessão(ões) de visitante</button>' : '')
+  setHeader('BSA Salto','Escolha uma opção', false);
+  var html = '';
+  UNIDADES.forEach(function(nome){
+    html += '<div class="student-card" onclick="abrirUnidade(\''+nome+'\')">'
+      + '<div class="avatar">🏟️</div>'
+      + '<div class="student-info"><p class="student-name">'+escapeHtml(nome)+'</p>'
+      + '<p class="student-sub">Ver alunos da unidade</p></div>'
+      + '</div>';
+  });
+  html += '<div class="student-card" onclick="openMedirVisitante()" style="border-style:dashed;">'
+    + '<div class="avatar">🙋</div>'
+    + '<div class="student-info"><p class="student-name">Visitante (não cadastrado)</p>'
+    + '<p class="student-sub">Testa o salto sem salvar nada no histórico</p></div>'
     + '</div>';
-  html += '<div class="search-wrap"><input id="searchInput" type="text" placeholder="Buscar aluno…" oninput="renderHome()" value="'+escapeHtml(document.getElementById('searchInput')?document.getElementById('searchInput').value:'')+'"></div>';
+  main.innerHTML = html;
+}
+window.renderHome = function(){ renderHome(document.getElementById('main')); };
+
+function renderUnidade(main){
+  setHeader(state.unidadeAtual, 'Escolha o aluno para medir', true);
+  var q = (document.getElementById('searchInput') && document.getElementById('searchInput').value || '').toLowerCase();
+  var list = state.students.filter(function(s){
+    return s.unidade === state.unidadeAtual && (!q || s.name.toLowerCase().indexOf(q) > -1);
+  });
+  var html = '<div class="instr-card" style="margin-bottom:14px;">'
+    + '<b>🎯 Circuito com celular coberto/preso na cintura</b><br>Toca uma vez pra montar a fila com todos os alunos desta unidade. Depois, só toque na tela: 1 toque pausa, 2 encerra o aluno atual, 3 toques já passa pro próximo — sem precisar ver a tela.'
+    + '<button class="btn btn-secondary" style="margin-top:10px;" onclick="iniciarCircuito()">Iniciar circuito com esta turma</button>'
+    + '</div>';
+  html += '<div class="search-wrap"><input id="searchInput" type="text" placeholder="Buscar aluno…" oninput="renderUnidade()" value="'+escapeHtml(document.getElementById('searchInput')?document.getElementById('searchInput').value:'')+'"></div>';
   if(!list.length){
     html += '<div class="empty-state">Nenhum aluno encontrado.</div>';
   } else {
@@ -487,16 +465,33 @@ function renderHome(main){
   var input = document.getElementById('searchInput');
   if(input){ var v = input.value; input.focus(); input.setSelectionRange(v.length, v.length); }
 }
-window.renderHome = function(){ renderHome(document.getElementById('main')); };
+window.renderUnidade = function(){ renderUnidade(document.getElementById('main')); };
+
+window.iniciarCircuito = function(){
+  var lista = state.students.filter(function(s){ return s.unidade === state.unidadeAtual; });
+  if(!lista.length){ showToast('Nenhum aluno nesta unidade.'); return; }
+  state.circuito = { queue: lista.map(function(s){ return s.id; }), idx:0 };
+  openMedir(lista[0].id);
+};
 
 function openMedir(id){
   state.currentStudentId = id;
+  state.guestMode = false;
   state.screen = 'medir';
   state.phase = 'idle';
   state.tLiftoff = null; state.manualResult = null; state.manualMode = false; state.session = {jumps:[]};
   render();
 }
 window.openMedir = openMedir;
+function openMedirVisitante(){
+  state.currentStudentId = null;
+  state.guestMode = true;
+  state.screen = 'medir';
+  state.phase = 'idle';
+  state.tLiftoff = null; state.manualResult = null; state.manualMode = false; state.session = {jumps:[]};
+  render();
+}
+window.openMedirVisitante = openMedirVisitante;
 
 function armar(v){
   if(v){
@@ -511,6 +506,7 @@ function armar(v){
         clearInterval(iv);
         state.phase = 'armado';
         lowStreak = 0;
+        impulsoDetectado = false;
         render();
       } else {
         render();
@@ -539,14 +535,15 @@ function falarContagemFinal(){
 }
 
 function renderMedir(main){
-  var s = getStudent(state.currentStudentId);
+  var s = state.guestMode ? {id:null, name:'Visitante', photo:null} : getStudent(state.currentStudentId);
   if(!s){ state.screen = 'home'; return render(); }
-  setHeader(s.name.split(' ')[0], 'Salto vertical', true);
+  var progresso = state.circuito ? (' · '+(state.circuito.idx+1)+' de '+state.circuito.queue.length) : '';
+  setHeader(s.name.split(' ')[0], 'Salto vertical'+progresso, true);
 
   var html = '<div class="eval-student-pill">'
     + avatarHtml(s, 'lg')
     + '<div class="info"><div class="name">'+escapeHtml(s.name)+'</div></div>'
-    + '<a onclick="openHistorico()">Histórico ›</a>'
+    + (state.guestMode ? '' : '<a onclick="openHistorico()">Histórico ›</a>')
     + '</div>';
 
   if(state.phase === 'relatorio'){
@@ -555,8 +552,13 @@ function renderMedir(main){
     html += '<div class="result-card"><div class="result-value">'+best.toFixed(0)+'</div>'
       + '<div class="result-unit">cm · melhor salto de '+jumps.length+'</div>'
       + '<div class="result-sub">'+jumps.map(function(j){return j.alturaCm.toFixed(0);}).join(' · ')+' cm</div></div>';
-    html += '<button class="btn btn-primary" onclick="salvarMelhorSalto()">Salvar recorde no histórico</button>';
-    html += '<div class="row-gap"><button class="btn btn-secondary" onclick="voltarParaHome()">Não salvar, próximo aluno</button></div>';
+    if(state.guestMode){
+      html += '<div class="status-text" style="text-align:center;margin-bottom:8px;">Modo visitante — nada é salvo</div>';
+      html += '<button class="btn btn-primary" onclick="voltarParaHome()">Ok, encerrar</button>';
+    } else {
+      html += '<button class="btn btn-primary" onclick="salvarMelhorSalto()">Salvar recorde no histórico</button>';
+      html += '<div class="row-gap"><button class="btn btn-secondary" onclick="voltarParaHome()">Não salvar, próximo aluno</button></div>';
+    }
     main.innerHTML = html;
     return;
   }
@@ -565,8 +567,13 @@ function renderMedir(main){
     var r = state.manualResult;
     html += '<div class="result-card"><div class="result-value">'+r.alturaCm.toFixed(0)+'</div>'
       + '<div class="result-unit">centímetros · salto único (manual)</div></div>';
-    html += '<button class="btn btn-primary" onclick="salvarResultadoManual()">Salvar no histórico</button>';
-    html += '<div class="row-gap"><button class="btn btn-secondary" onclick="state.manualResult=null; render();">Cancelar</button></div>';
+    if(state.guestMode){
+      html += '<div class="status-text" style="text-align:center;margin-bottom:8px;">Modo visitante — nada é salvo</div>';
+      html += '<button class="btn btn-primary" onclick="voltarParaHome()">Ok, encerrar</button>';
+    } else {
+      html += '<button class="btn btn-primary" onclick="salvarResultadoManual()">Salvar no histórico</button>';
+      html += '<div class="row-gap"><button class="btn btn-secondary" onclick="state.manualResult=null; render();">Cancelar</button></div>';
+    }
     main.innerHTML = html;
     return;
   }
@@ -583,7 +590,8 @@ function renderMedir(main){
   html += '<div class="instr-card"><b>Como medir:</b>'
     + '<ol><li>Toque em "Pronto pra saltar" <u>antes</u> de prender o celular</li>'
     + '<li>Você tem 10 segundos (com contagem por voz) pra prender o celular na cintura, bem firme</li>'
-    + '<li>Quando ouvir "pode saltar", o aluno pode saltar quantas vezes quiser, sem tocar na tela — toque "Terminei" no final</li></ol></div>';
+    + '<li>Quando ouvir "pode saltar", pode saltar quantas vezes quiser sem tocar na tela</li>'
+    + '<li>Toque em qualquer lugar da tela: <b>1 toque</b> pausa/continua · <b>2 toques</b> encerra este aluno · '+(state.circuito?'<b>3 toques</b> já passa pro próximo aluno da fila':'"Terminei" no botão')+'</li></ol></div>';
 
   if(!state.sensorOk){
     html += '<button class="btn btn-primary" onclick="liberarSensor()">📱 Liberar sensor de movimento</button>';
@@ -633,6 +641,7 @@ window.terminarSessao = function(){
   clearTimeout(rearmTimeoutId);
   if(!state.session.jumps.length){ showToast('Nenhum salto registrado ainda.'); return; }
   state.phase = 'relatorio';
+  falarEncerrado();
   render();
 };
 window.salvarMelhorSalto = function(){
@@ -644,9 +653,39 @@ window.salvarMelhorSalto = function(){
   voltarParaHome();
 };
 window.voltarParaHome = function(){
-  state.phase = 'idle'; state.session = {jumps:[]};
-  state.screen = 'home'; state.currentStudentId = null;
+  var wasGuest = state.guestMode;
+  state.phase = 'idle'; state.session = {jumps:[]}; state.circuito = null;
+  state.screen = wasGuest ? 'home' : 'unidade'; state.currentStudentId = null; state.guestMode = false;
   render();
+};
+window.avancarCircuito = function(){
+  var c = state.circuito;
+  if(!c){ falar('Nenhum circuito ativo. Use o botão de circuito na lista da turma.'); return; }
+  clearTimeout(rearmTimeoutId);
+  var s = getStudent(state.currentStudentId);
+  if(s && state.session.jumps.length){
+    var best = state.session.jumps.reduce(function(m,j){ return j.alturaCm>m.alturaCm?j:m; }, state.session.jumps[0]);
+    salvarMedicao(s, best);
+  }
+  c.idx++;
+  if(c.idx >= c.queue.length){
+    vibrar([120,80,120,80,120]);
+    falar('Fim da turma. Todos os saltos foram salvos.');
+    state.circuito = null;
+    state.phase = 'idle'; state.session = {jumps:[]};
+    state.screen = 'unidade'; state.currentStudentId = null;
+    render();
+    return;
+  }
+  vibrar([70,50,70,50,70]);
+  state.currentStudentId = c.queue[c.idx];
+  state.session = {jumps:[]};
+  state.manualResult = null; state.manualMode = false;
+  state.phase = 'armado'; lowStreak = 0; impulsoDetectado = false;
+  state.paused = true;
+  falar('Pode iniciar o salto.');
+  render();
+  setTimeout(function(){ state.paused = false; }, 2000);
 };
 
 function openHistorico(){ state.screen = 'historico'; render(); }
@@ -672,69 +711,6 @@ function renderHistorico(main){
   main.innerHTML = html;
 }
 
-function renderVisitanteAtivo(main){
-  setHeader('Modo visitante','Celular coberto — use toques', true);
-  var v = state.visitor;
-  var sess = v.activeIdx >= 0 ? v.queue[v.activeIdx] : null;
-  var html = '<div class="instr-card"><b>Gestos (toque em qualquer lugar da tela):</b>'
-    + '<ol><li>1 toque: pausar / continuar</li><li>2 toques: encerrar sessão do aluno atual</li>'
-    + '<li>3 toques: começar com o próximo aluno</li><li>4 toques: sair do modo visitante</li></ol></div>';
-  if(!sess){
-    html += '<div class="status-card"><div class="status-icon">⏳</div><div class="status-text">Preparando…</div></div>';
-  } else {
-    html += '<div class="status-card"><div class="status-icon">'+(v.paused?'⏸️':(v.armed?'🧍':'⏳'))+'</div>'
-      + '<div class="status-text">Aluno atual — '+sess.jumps.length+' salto(s)'+(v.paused?' · pausado':'')+'</div>'
-      + (sess.jumps.length ? '<div class="status-count" style="font-size:34px;">'+Math.max.apply(null, sess.jumps.map(function(j){return j.alturaCm;})).toFixed(0)+' cm</div>' : '')
-      + '</div>';
-  }
-  main.innerHTML = html;
-}
-
-function renderVisitanteRevisao(main){
-  setHeader('Revisão de visitantes','Atribua cada sessão a um aluno', true);
-  var v = state.visitor;
-  var pendentes = v.queue.map(function(s,i){ return {s:s,i:i}; }).filter(function(o){ return o.s.jumps.length; });
-  var html = '';
-  if(!pendentes.length){
-    html = '<div class="empty-state">Nenhuma sessão de visitante registrada ainda.</div>';
-  } else {
-    pendentes.forEach(function(o){
-      var s = o.s;
-      var best = Math.max.apply(null, s.jumps.map(function(j){return j.alturaCm;}));
-      html += '<div class="history-item" style="flex-direction:column;align-items:stretch;">'
-        + '<div style="display:flex;justify-content:space-between;align-items:center;">'
-        + '<div><div class="v">Visitante '+(o.i+1)+'</div><div class="d">'+s.jumps.length+' saltos · recorde '+best.toFixed(0)+' cm</div></div>'
-        + (s.assignedTo ? '<div class="d">✅ '+escapeHtml(s.assignedTo)+'</div>' : '<button class="btn btn-secondary" style="width:auto;padding:8px 14px;" onclick="abrirAtribuir('+o.i+')">Atribuir a aluno</button>')
-        + '</div>'
-        + (state.atribuindoIdx === o.i ? renderSeletorAluno() : '')
-        + '</div>';
-    });
-  }
-  main.innerHTML = html;
-}
-function renderSeletorAluno(){
-  var q = (state.atribuirBusca||'').toLowerCase();
-  var list = state.students.filter(function(s){ return !q || s.name.toLowerCase().indexOf(q)>-1; }).slice(0,8);
-  var html = '<div class="search-wrap" style="margin-top:10px;"><input type="text" placeholder="Buscar aluno…" oninput="state.atribuirBusca=this.value; render();" value="'+escapeHtml(state.atribuirBusca||'')+'"></div>';
-  list.forEach(function(s){
-    html += '<div class="student-card" style="padding:9px 12px;" onclick="confirmarAtribuir(\''+s.id+'\')">'+avatarHtml(s)+'<div class="student-info"><p class="student-name">'+escapeHtml(s.name)+'</p></div></div>';
-  });
-  return html;
-}
-window.abrirAtribuir = function(idx){ state.atribuindoIdx = idx; state.atribuirBusca=''; render(); };
-window.confirmarAtribuir = function(alunoId){
-  var v = state.visitor;
-  var sess = v.queue[state.atribuindoIdx];
-  var s = getStudent(alunoId);
-  if(!s || !sess) return;
-  var best = sess.jumps.reduce(function(m,j){ return j.alturaCm>m.alturaCm?j:m; }, sess.jumps[0]);
-  salvarMedicao(s, best);
-  sess.assignedTo = s.name;
-  state.atribuindoIdx = null;
-  render();
-};
-
-attachGestureListener();
 initFirebase();
 setTimeout(function(){ if(state.screen==='loading') boot(); }, 3000);
 })();
