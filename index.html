@@ -290,7 +290,7 @@ document.addEventListener('touchend', function(e){
     tapTimes = [];
     if(n === 1) togglePausa();
     else if(n === 2) terminarSessao();
-    else if(n >= 3) avancarCircuito();
+    else if(n >= 3){ if(state.guestMode) avancarVisitante(); else avancarCircuito(); }
   }, 400);
 }, {passive:true});
 function vibrar(pattern){ try{ if(navigator.vibrate) navigator.vibrate(pattern); }catch(e){} }
@@ -431,7 +431,7 @@ function renderHome(main){
   html += '<div class="student-card" onclick="openMedirVisitante()" style="border-style:dashed;">'
     + '<div class="avatar">🙋</div>'
     + '<div class="student-info"><p class="student-name">Visitante (não cadastrado)</p>'
-    + '<p class="student-sub">Testa o salto sem salvar nada no histórico</p></div>'
+    + '<p class="student-sub">Testa o salto sem salvar — 3 toques na tela falam o recorde e liberam pro próximo</p></div>'
     + '</div>';
   main.innerHTML = html;
 }
@@ -591,7 +591,7 @@ function renderMedir(main){
     + '<ol><li>Toque em "Pronto pra saltar" <u>antes</u> de prender o celular</li>'
     + '<li>Você tem 10 segundos (com contagem por voz) pra prender o celular na cintura, bem firme</li>'
     + '<li>Quando ouvir "pode saltar", pode saltar quantas vezes quiser sem tocar na tela</li>'
-    + '<li>Toque em qualquer lugar da tela: <b>1 toque</b> pausa/continua · <b>2 toques</b> encerra este aluno · '+(state.circuito?'<b>3 toques</b> já passa pro próximo aluno da fila':'"Terminei" no botão')+'</li></ol></div>';
+    + '<li>Toque em qualquer lugar da tela: <b>1 toque</b> pausa/continua · <b>2 toques</b> encerra'+(state.guestMode?'':' este aluno')+' · '+(state.guestMode?'<b>3 toques</b> fala o recorde e já libera pro próximo, sem salvar nada':(state.circuito?'<b>3 toques</b> já passa pro próximo aluno da fila':'"Terminei" no botão'))+'</li></ol></div>';
 
   if(!state.sensorOk){
     html += '<button class="btn btn-primary" onclick="liberarSensor()">📱 Liberar sensor de movimento</button>';
@@ -657,6 +657,18 @@ window.voltarParaHome = function(){
   state.phase = 'idle'; state.session = {jumps:[]}; state.circuito = null;
   state.screen = wasGuest ? 'home' : 'unidade'; state.currentStudentId = null; state.guestMode = false;
   render();
+};
+window.avancarVisitante = function(){
+  var jumps = state.session.jumps;
+  var best = jumps.length ? Math.max.apply(null, jumps.map(function(j){ return j.alturaCm; })) : 0;
+  vibrar([70,50,70,50,70]);
+  falar(jumps.length ? ('Recorde: '+best.toFixed(0)+' centímetros. Pode saltar.') : 'Nenhum salto registrado. Pode saltar.');
+  state.session = {jumps:[]};
+  clearTimeout(rearmTimeoutId);
+  state.phase = 'armado'; lowStreak = 0; impulsoDetectado = false;
+  state.paused = true;
+  render();
+  setTimeout(function(){ state.paused = false; }, 1500);
 };
 window.avancarCircuito = function(){
   var c = state.circuito;
