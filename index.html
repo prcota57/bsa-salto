@@ -383,6 +383,7 @@ function goBack(){
   if(state.screen === 'medir'){ armar(false); state.circuito = null; state.screen = state.guestMode ? 'home' : 'unidade'; state.currentStudentId = null; state.guestMode = false; }
   else if(state.screen === 'historico'){ state.screen = 'medir'; }
   else if(state.screen === 'unidade'){ state.screen = 'home'; }
+  else { sairApp(); return; }
   render();
 }
 function setHeader(title, sub, showBack){
@@ -419,7 +420,7 @@ function abrirUnidade(nome){
 window.abrirUnidade = abrirUnidade;
 
 function renderHome(main){
-  setHeader('BSA Salto','Escolha uma opção', false);
+  setHeader('BSA Salto','Escolha uma opção', true);
   var html = '';
   UNIDADES.forEach(function(nome){
     html += '<div class="student-card" onclick="abrirUnidade(\''+nome+'\')">'
@@ -722,6 +723,33 @@ function renderHistorico(main){
   }
   main.innerHTML = html;
 }
+
+/* ===== Saida para o Hub: botao visivel (ja existente, id backBtn) + 2 toques rapidos ===== */
+function sairApp(){
+  if (navigator.vibrate) navigator.vibrate([30, 50, 30]);
+  try {
+    var u = new SpeechSynthesisUtterance('Saindo');
+    u.lang = 'pt-BR';
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  } catch(e) {}
+  setTimeout(function(){
+    if (window.history.length > 1) window.history.back();
+    else window.location.href = 'https://prcota57.github.io/BSA-cadastro/';
+  }, 400);
+}
+var lastTapTime = 0, DOUBLE_TAP_MS = 450;
+function isControleToque(el){ return !!(el && el.closest && el.closest('button, input, a')); }
+document.addEventListener('click', function(e){
+  if (isControleToque(e.target)) return;
+  var now = Date.now();
+  if (now - lastTapTime < DOUBLE_TAP_MS) {
+    lastTapTime = 0;
+    if (state.screen === 'home') sairApp(); else goBack();
+  } else {
+    lastTapTime = now;
+  }
+});
 
 initFirebase();
 setTimeout(function(){ if(state.screen==='loading') boot(); }, 3000);
